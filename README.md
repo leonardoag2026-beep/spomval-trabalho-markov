@@ -19,15 +19,21 @@ entregue, cancelado).
 3. Calcula a distribuição estacionária por dois métodos independentes: sistema linear associado
    ao autovalor 1, resolvido por eliminação de Gauss com pivoteamento parcial, e convergência
    iterativa de v = vP.
-4. Gera o gráfico da evolução das probabilidades em SVG e imprime a interpretação do
+4. Gera o gráfico da evolução das probabilidades em PNG e imprime a interpretação do
    comportamento de longo prazo.
 
-Toda a álgebra linear é implementada com laços e listas: o programa **não usa NumPy** nem
-qualquer biblioteca de álgebra linear, conforme a exigência do enunciado.
+A multiplicação de vetores e matrizes usa NumPy, que é operação elementar. O que o trabalho
+precisa demonstrar — a montagem de (Pᵀ − I)π = 0, o posto e a eliminação de Gauss com
+pivotamento parcial — está escrito no próprio arquivo, sem `numpy.linalg.solve` e sem função
+pronta de autovalores. O gráfico usa matplotlib.
 
 ## Requisitos
 
-Python 3.8 ou superior. Nenhuma dependência externa.
+Python 3.8 ou superior, com NumPy e matplotlib:
+
+```bash
+pip install numpy matplotlib
+```
 
 ## Execução
 
@@ -39,7 +45,7 @@ python3 markov.py --testes   # dois casos de teste com verificação automática
 
 Na opção 2 do menu, o programa pede a ordem da matriz, o nome dos estados, as linhas da matriz e
 o vetor inicial, validando cada entrada antes de calcular. O gráfico é salvo em
-`grafico_evolucao.svg`.
+`grafico_evolucao.png`.
 
 ## Arquivos
 
@@ -47,8 +53,7 @@ o vetor inicial, validando cada entrada antes de calcular. O gráfico é salvo e
 |---|---|
 | `markov.py` | implementação completa, com funções separadas e comentadas |
 | `relatorio-markov.pdf` | relatório do trabalho (teoria, aplicação, testes e análise) |
-| `grafico_evolucao.svg` | gráfico gerado pelo programa (criado na execução) |
-| `grafico_evolucao.png` | versão em imagem, usada no relatório |
+| `grafico_evolucao.png` | gráfico gerado pelo programa com matplotlib |
 
 ## Resultado principal
 

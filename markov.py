@@ -5,9 +5,10 @@
 Trabalho prático da disciplina SPOMVAL - Vetores, Geometria Analítica e
 Álgebra Linear (IFSP, 2026/2).
 
-O programa não usa bibliotecas de álgebra linear: multiplicação de matrizes,
-eliminação de Gauss e geração do gráfico são implementadas com funções básicas
-da linguagem, como pede o enunciado.
+A multiplicação de vetores e matrizes usa NumPy; o cálculo do vetor
+estacionário (eliminação de Gauss com pivoteamento parcial) e o posto da
+matriz são escritos no próprio programa, sem solver pronto. O gráfico usa
+matplotlib.
 
 Uso:
     python3 markov.py            # menu interativo
@@ -16,6 +17,12 @@ Uso:
 """
 
 import sys
+
+import matplotlib
+import numpy as np
+
+matplotlib.use("Agg")  # backend sem janela: o gráfico é salvo em arquivo
+import matplotlib.pyplot as plt
 
 # ---------------------------------------------------------------------------
 # 1. Entrada de dados
@@ -49,25 +56,24 @@ def ler_decimal(mensagem):
 
 def ler_matriz(n):
     """Lê uma matriz quadrada n x n, linha por linha, com n valores por linha."""
-    matriz = []
+    linhas = []
     for i in range(n):
         while True:
-            linha = input(f"  Linha {i + 1} (ou 'u' para distribuição uniforme): ").strip()
-            if linha.lower() == "u":
-                matriz.append([1.0 / n] * n)
+            texto = input(f"  Linha {i + 1} (ou 'u' para distribuição uniforme): ").strip()
+            if texto.lower() == "u":
+                linhas.append([1.0 / n] * n)
                 break
-            partes = linha.replace(",", ".").split()
+            partes = texto.replace(",", ".").split()
             if len(partes) != n:
                 print(f"  Informe exatamente {n} valores separados por espaço.")
                 continue
             try:
-                valores = [float(p) for p in partes]
+                linhas.append([float(p) for p in partes])
             except ValueError:
                 print("  Todos os valores precisam ser numéricos.")
                 continue
-            matriz.append(valores)
             break
-    return matriz
+    return np.array(linhas, dtype=float)
 
 
 def ler_vetor(n):
@@ -78,7 +84,7 @@ def ler_vetor(n):
             print(f"  Informe exatamente {n} valores separados por espaço.")
             continue
         try:
-            return [float(p) for p in partes]
+            return np.array([float(p) for p in partes], dtype=float)
         except ValueError:
             print("  Todos os valores precisam ser numéricos.")
 
@@ -93,100 +99,40 @@ def validar_matriz(matriz):
 
     Uma matriz de transição estocástica precisa ter linhas que somam 1,
     porque cada linha representa todas as possibilidades de saída do estado.
-    A tolerância 1e-9 evita erro de arredondamento de ponto flutuante.
     """
-    linhas = len(matriz)
-    if linhas == 0:
-        raise ValueError("A matriz está vazia.")
-    for i, linha in enumerate(matriz):
-        if len(linha) != linhas:
-            raise ValueError(f"A matriz não é quadrada: a linha {i + 1} tem {len(linha)} valores.")
-        for valor in linha:
-            if valor < 0 or valor > 1:
-                raise ValueError(f"Probabilidade fora do intervalo [0, 1] na linha {i + 1}.")
-        if abs(sum(linha) - 1.0) > 1e-9:
-            raise ValueError(
-                f"A linha {i + 1} soma {sum(linha):.6f}; toda linha precisa somar 1."
-            )
+    if matriz.ndim != 2 or matriz.shape[0] != matriz.shape[1]:
+        raise ValueError("A matriz de transição precisa ser quadrada.")
+    if np.any(matriz < 0) or np.any(matriz > 1):
+        raise ValueError("As probabilidades precisam estar entre 0 e 1.")
+    somas = matriz.sum(axis=1)
+    if not np.allclose(somas, 1.0, atol=1e-9):
+        linha = int(np.argmax(np.abs(somas - 1.0))) + 1
+        raise ValueError(f"A linha {linha} soma {somas[linha - 1]:.6f}; toda linha precisa somar 1.")
 
 
 def validar_vetor(vetor, n):
     """Confere se o vetor inicial tem dimensão n, entradas não negativas e soma 1."""
-    if len(vetor) != n:
+    if vetor.shape != (n,):
         raise ValueError(f"O vetor inicial precisa ter {n} componentes.")
-    if any(valor < 0 for valor in vetor):
+    if np.any(vetor < 0):
         raise ValueError("O vetor inicial não pode ter valores negativos.")
-    if abs(sum(vetor) - 1.0) > 1e-9:
-        raise ValueError(f"O vetor inicial soma {sum(vetor):.6f}; precisa somar 1.")
+    if not np.isclose(vetor.sum(), 1.0, atol=1e-9):
+        raise ValueError(f"O vetor inicial soma {vetor.sum():.6f}; precisa somar 1.")
 
 
 # ---------------------------------------------------------------------------
-# 3. Álgebra linear implementada com funções básicas
+# 3. Álgebra linear do cálculo estacionário
 # ---------------------------------------------------------------------------
 
 
 def multiplicar_vetor_matriz(vetor, matriz):
-    """Calcula o produto de um vetor linha pela matriz: w_j = soma_i (v_i * P_ij).
-
-    É a operação que aplica uma etapa da cadeia de Markov à distribuição.
-    """
-    n = len(vetor)
-    resultado = []
-    for j in range(n):
-        soma = 0.0
-        for i in range(n):
-            soma += vetor[i] * matriz[i][j]
-        resultado.append(soma)
-    return resultado
-
-
-def multiplicar_matrizes(a, b):
-    """Calcula o produto de duas matrizes quadradas (usado para obter P^k)."""
-    n = len(a)
-    produto = [[0.0] * n for _ in range(n)]
-    for i in range(n):
-        for j in range(n):
-            soma = 0.0
-            for k in range(n):
-                soma += a[i][k] * b[k][j]
-            produto[i][j] = soma
-    return produto
+    """Calcula o produto de um vetor linha pela matriz: w = v · P (NumPy)."""
+    return vetor @ matriz
 
 
 def potencia_matriz(matriz, expoente):
-    """Eleva a matriz de transição ao expoente por quadrados sucessivos."""
-    n = len(matriz)
-    resultado = [[1.0 if i == j else 0.0 for j in range(n)] for i in range(n)]
-    base = [linha[:] for linha in matriz]
-    while expoente > 0:
-        if expoente % 2 == 1:
-            resultado = multiplicar_matrizes(resultado, base)
-        base = multiplicar_matrizes(base, base)
-        expoente //= 2
-    return resultado
-
-
-def resolver_sistema(matriz, termos):
-    """Resolve A x = b por eliminação de Gauss com pivoteamento parcial.
-
-    Retorna None quando o sistema é singular (não há solução única).
-    """
-    n = len(matriz)
-    a = [linha[:] + [termos[i]] for i, linha in enumerate(matriz)]
-    for coluna in range(n):
-        pivo = max(range(coluna, n), key=lambda i: abs(a[i][coluna]))
-        if abs(a[pivo][coluna]) < 1e-12:
-            return None
-        a[coluna], a[pivo] = a[pivo], a[coluna]
-        for i in range(coluna + 1, n):
-            fator = a[i][coluna] / a[coluna][coluna]
-            for j in range(coluna, n + 1):
-                a[i][j] -= fator * a[coluna][j]
-    solucao = [0.0] * n
-    for i in range(n - 1, -1, -1):
-        soma = a[i][n] - sum(a[i][j] * solucao[j] for j in range(i + 1, n))
-        solucao[i] = soma / a[i][i]
-    return solucao
+    """Eleva a matriz de transição ao expoente (NumPy)."""
+    return np.linalg.matrix_power(matriz, expoente)
 
 
 def posto(matriz):
@@ -196,33 +142,49 @@ def posto(matriz):
     se o posto for n - 1, o vetor estacionário é único; se for menor, a cadeia
     tem mais de uma classe fechada e o limite depende do vetor inicial.
     """
-    n = len(matriz)
-    a = [linha[:] for linha in matriz]
+    a = np.array(matriz, dtype=float, copy=True)
+    n = a.shape[0]
     linhas_com_pivo = 0
     for coluna in range(n):
-        pivo = max(range(linhas_com_pivo, n), key=lambda i: abs(a[i][coluna]), default=None)
-        if pivo is None or abs(a[pivo][coluna]) < 1e-12:
+        resto = np.abs(a[linhas_com_pivo:, coluna])
+        if resto.size == 0 or resto.max() < 1e-12:
             continue
-        a[linhas_com_pivo], a[pivo] = a[pivo], a[linhas_com_pivo]
+        pivo = linhas_com_pivo + int(np.argmax(resto))
+        if pivo != linhas_com_pivo:
+            a[[linhas_com_pivo, pivo]] = a[[pivo, linhas_com_pivo]]
         for i in range(n):
-            if i != linhas_com_pivo and abs(a[i][coluna]) > 0:
-                fator = a[i][coluna] / a[linhas_com_pivo][coluna]
-                for j in range(coluna, n):
-                    a[i][j] -= fator * a[linhas_com_pivo][j]
+            if i != linhas_com_pivo and abs(a[i, coluna]) > 0:
+                fator = a[i, coluna] / a[linhas_com_pivo, coluna]
+                a[i, coluna:] -= fator * a[linhas_com_pivo, coluna:]
         linhas_com_pivo += 1
     return linhas_com_pivo
 
 
+def resolver_sistema(matriz, termos):
+    """Resolve A x = b por eliminação de Gauss com pivoteamento parcial.
+
+    Devolve None quando o sistema é singular (não há solução única).
+    """
+    n = matriz.shape[0]
+    a = np.hstack([np.array(matriz, dtype=float), np.array(termos, dtype=float).reshape(n, 1)])
+    for coluna in range(n):
+        pivo = coluna + int(np.argmax(np.abs(a[coluna:, coluna])))
+        if abs(a[pivo, coluna]) < 1e-12:
+            return None
+        if pivo != coluna:
+            a[[coluna, pivo]] = a[[pivo, coluna]]
+        for i in range(coluna + 1, n):
+            fator = a[i, coluna] / a[coluna, coluna]
+            a[i, coluna:] -= fator * a[coluna, coluna:]
+    solucao = np.zeros(n)
+    for i in range(n - 1, -1, -1):
+        solucao[i] = (a[i, n] - a[i, i + 1:n] @ solucao[i + 1:n]) / a[i, i]
+    return solucao
+
+
 def matriz_do_sistema_estacionario(matriz):
     """Monta (P^T - I), a matriz do sistema π(P - I) = 0 escrito como Aπ = 0."""
-    n = len(matriz)
-    sistema = []
-    for i in range(n):
-        linha = []
-        for j in range(n):
-            linha.append(matriz[j][i] - (1.0 if i == j else 0.0))
-        sistema.append(linha)
-    return sistema
+    return matriz.T - np.eye(matriz.shape[0])
 
 
 def distribuicao_estacionaria_por_sistema(matriz):
@@ -234,12 +196,13 @@ def distribuicao_estacionaria_por_sistema(matriz):
     Devolve None quando a cadeia tem mais de uma classe fechada (mais de um
     estado absorvente, por exemplo), pois aí o limite depende de v(0).
     """
-    n = len(matriz)
+    n = matriz.shape[0]
     sistema = matriz_do_sistema_estacionario(matriz)
     if n - posto(sistema) > 1:
         return None
-    sistema[-1] = [1.0] * n  # normalização: soma das componentes = 1
-    termos = [0.0] * (n - 1) + [1.0]
+    sistema[-1] = np.ones(n)          # normalização: soma das componentes = 1
+    termos = np.zeros(n)
+    termos[-1] = 1.0
     return resolver_sistema(sistema, termos)
 
 
@@ -248,10 +211,10 @@ def distribuicao_estacionaria_por_convergencia(vetor, matriz, tolerancia=1e-14, 
 
     Devolve a distribuição final e o número de passos usados.
     """
-    atual = vetor[:]
+    atual = np.array(vetor, dtype=float)
     for passo in range(1, maximo + 1):
         proximo = multiplicar_vetor_matriz(atual, matriz)
-        variacao = max(abs(a - b) for a, b in zip(atual, proximo))
+        variacao = float(np.max(np.abs(atual - proximo)))
         atual = proximo
         if variacao < tolerancia:
             return atual, passo
@@ -259,12 +222,11 @@ def distribuicao_estacionaria_por_convergencia(vetor, matriz, tolerancia=1e-14, 
 
 
 def evoluir(vetor, matriz, passos):
-    """Devolve a história da distribuição: [v(0), v(1), ..., v(k)]."""
-    historia = [vetor[:]]
-    atual = vetor[:]
-    for _ in range(passos):
-        atual = multiplicar_vetor_matriz(atual, matriz)
-        historia.append(atual)
+    """Devolve a história da distribuição: [v(0), v(1), ..., v(k)] como matriz (k+1) x n."""
+    historia = np.zeros((passos + 1, vetor.size))
+    historia[0] = vetor
+    for passo in range(1, passos + 1):
+        historia[passo] = historia[passo - 1] @ matriz
     return historia
 
 
@@ -275,10 +237,7 @@ def evoluir(vetor, matriz, passos):
 
 def formatar_linha(nomes, valores):
     """Monta uma linha de tabela com nome do estado e probabilidade em porcentagem."""
-    partes = []
-    for nome, valor in zip(nomes, valores):
-        partes.append(f"{nome}={valor * 100:7.3f}%")
-    return "  ".join(partes)
+    return "  ".join(f"{nome}={valor * 100:7.3f}%" for nome, valor in zip(nomes, valores))
 
 
 def imprimir_distribuicao(titulo, nomes, valores):
@@ -289,110 +248,39 @@ def imprimir_distribuicao(titulo, nomes, valores):
     print(f"  {'soma':<12} {sum(valores) * 100:9.4f}%")
 
 
-def escrever_grafico_svg(historia, nomes, caminho, titulo):
-    """Gera um gráfico de linhas em SVG puro, sem biblioteca de desenho.
+def escrever_grafico(historia, nomes, caminho, titulo):
+    """Gera o gráfico da evolução com matplotlib e salva em PNG.
 
-    O eixo horizontal é o número de transições e o vertical, a probabilidade
-    de cada estado. As linhas usam tons de cinza e estilos de traço diferentes
-    para continuarem distinguíveis quando o gráfico é impresso em preto e branco.
+    As curvas usam tons de cinza e estilos de traço diferentes para continuarem
+    distinguíveis quando o gráfico é impresso em preto e branco. A legenda fica
+    fora da área do gráfico, para não cruzar as linhas.
     """
-    largura, altura = 1060, 560
-    esquerda, direita, topo, base = 90, 300, 60, 70
-    area_largura = largura - esquerda - direita
-    area_altura = altura - topo - base
-    passos = len(historia) - 1
-
-    def x(passo):
-        """Converte o índice do passo em coordenada horizontal do SVG."""
-        return esquerda + (passo / passos) * area_largura if passos else esquerda
-
-    def y(valor):
-        """Converte uma probabilidade em coordenada vertical (eixo invertido)."""
-        return topo + area_altura - valor * area_altura
-
     estilos = [
-        ("#000000", "6,0", 2.4),
-        ("#444444", "5,3", 2.0),
-        ("#777777", "2,3", 2.0),
-        ("#999999", "8,2,2,2", 1.8),
-        ("#bbbbbb", "1,3", 2.2),
-        ("#333333", "10,3", 1.6),
+        ("-", "#000000"),
+        ("--", "#444444"),
+        (":", "#777777"),
+        ("-.", "#999999"),
+        ((0, (1, 1)), "#bbbbbb"),
+        ((0, (6, 2, 1, 2)), "#333333"),
     ]
+    passos = np.arange(historia.shape[0])
 
-    partes = []
-    partes.append(
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{largura}" height="{altura}" '
-        f'viewBox="0 0 {largura} {altura}" font-family="Helvetica, Arial, sans-serif">'
-    )
-    partes.append(f'<rect width="{largura}" height="{altura}" fill="#ffffff"/>')
-    partes.append(
-        f'<text x="{largura / 2:.0f}" y="32" font-size="19" text-anchor="middle">{titulo}</text>'
-    )
-    # grade horizontal e rótulos do eixo y
-    for i in range(6):
-        valor = i / 5
-        yy = y(valor)
-        partes.append(
-            f'<line x1="{esquerda}" y1="{yy:.1f}" x2="{esquerda + area_largura}" y2="{yy:.1f}" '
-            f'stroke="#dddddd" stroke-width="1"/>'
-        )
-        partes.append(
-            f'<text x="{esquerda - 12}" y="{yy + 5:.1f}" font-size="13" text-anchor="end">'
-            f"{valor * 100:.0f}%</text>"
-        )
-    # eixos
-    partes.append(
-        f'<line x1="{esquerda}" y1="{topo}" x2="{esquerda}" y2="{topo + area_altura}" stroke="#000" stroke-width="1.4"/>'
-    )
-    partes.append(
-        f'<line x1="{esquerda}" y1="{topo + area_altura}" x2="{esquerda + area_largura}" '
-        f'y2="{topo + area_altura}" stroke="#000" stroke-width="1.4"/>'
-    )
-    # marcas do eixo x
-    marcas = sorted(set([0, passos // 4, passos // 2, (3 * passos) // 4, passos]))
-    for passo in marcas:
-        partes.append(
-            f'<line x1="{x(passo):.1f}" y1="{topo + area_altura}" x2="{x(passo):.1f}" '
-            f'y2="{topo + area_altura + 6}" stroke="#000" stroke-width="1.2"/>'
-        )
-        partes.append(
-            f'<text x="{x(passo):.1f}" y="{topo + area_altura + 24}" font-size="13" '
-            f'text-anchor="middle">{passo}</text>'
-        )
-    partes.append(
-        f'<text x="{esquerda + area_largura / 2:.0f}" y="{altura - 22}" font-size="14" '
-        f'text-anchor="middle">número de transições (k)</text>'
-    )
-    partes.append(
-        f'<text x="26" y="{topo + area_altura / 2:.0f}" font-size="14" text-anchor="middle" '
-        f'transform="rotate(-90 26 {topo + area_altura / 2:.0f})">probabilidade do estado</text>'
-    )
-    # uma polilinha por estado
+    figura, eixo = plt.subplots(figsize=(9.0, 4.8), dpi=200, layout="constrained")
     for indice, nome in enumerate(nomes):
-        cor, tracejado, espessura = estilos[indice % len(estilos)]
-        pontos = " ".join(
-            f"{x(passo):.1f},{y(historia[passo][indice]):.1f}" for passo in range(passos + 1)
-        )
-        partes.append(
-            f'<polyline points="{pontos}" fill="none" stroke="{cor}" stroke-width="{espessura}" '
-            f'stroke-dasharray="{tracejado}" stroke-linejoin="round"/>'
-        )
-    # legenda fora da área do gráfico, para não cruzar as linhas
-    base_legenda = esquerda + area_largura + 30
-    for indice, nome in enumerate(nomes):
-        cor, tracejado, espessura = estilos[indice % len(estilos)]
-        yy = topo + 10 + indice * 24
-        partes.append(
-            f'<line x1="{base_legenda}" y1="{yy}" x2="{base_legenda + 42}" '
-            f'y2="{yy}" stroke="{cor}" stroke-width="{espessura}" stroke-dasharray="{tracejado}"/>'
-        )
-        partes.append(
-            f'<text x="{base_legenda + 52}" y="{yy + 5}" font-size="13">{nome}</text>'
-        )
-    partes.append("</svg>")
-
-    with open(caminho, "w", encoding="utf-8") as arquivo:
-        arquivo.write("\n".join(partes))
+        estilo, cor = estilos[indice % len(estilos)]
+        eixo.plot(passos, historia[:, indice] * 100, linestyle=estilo, color=cor,
+                  linewidth=1.8, label=nome)
+    eixo.set_xlabel("número de transições (k)", fontsize=10)
+    eixo.set_ylabel("probabilidade (%)", fontsize=10)
+    eixo.set_ylim(-2, 102)
+    eixo.set_xlim(0, passos[-1])
+    eixo.set_title(titulo, fontsize=11)
+    eixo.grid(True, which="major", color="#dddddd", linewidth=0.6)
+    eixo.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=False, fontsize=9)
+    eixo.spines["top"].set_visible(False)
+    eixo.spines["right"].set_visible(False)
+    figura.savefig(caminho, facecolor="white")
+    plt.close(figura)
     return caminho
 
 
@@ -403,25 +291,25 @@ def escrever_grafico_svg(historia, nomes, caminho, titulo):
 NOMES_DELIVERY = ["Carrinho", "Pagamento", "Preparo", "Transito", "Entregue", "Cancelado"]
 
 # Linhas = estado atual; colunas = próximo estado. Cada linha soma 1.
-MATRIZ_DELIVERY = [
+MATRIZ_DELIVERY = np.array([
     [0.05, 0.85, 0.00, 0.00, 0.00, 0.10],
     [0.00, 0.05, 0.85, 0.00, 0.00, 0.10],
     [0.00, 0.00, 0.05, 0.85, 0.05, 0.05],
     [0.00, 0.00, 0.00, 0.10, 0.85, 0.05],
     [0.00, 0.00, 0.00, 0.00, 1.00, 0.00],
     [0.00, 0.00, 0.00, 0.00, 0.00, 1.00],
-]
-VETOR_DELIVERY = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+])
+VETOR_DELIVERY = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
 
-def executar_caso(nomes, matriz, vetor, passos, titulo, caminho_svg="grafico_evolucao.svg"):
+def executar_caso(nomes, matriz, vetor, passos, titulo, caminho_png="grafico_evolucao.png"):
     """Roda o caso completo: valida, evolui, calcula o estacionário e gera o gráfico."""
     validar_matriz(matriz)
-    validar_vetor(vetor, len(matriz))
+    validar_vetor(vetor, matriz.shape[0])
     historia = evoluir(vetor, matriz, passos)
 
     print(f"\n=== {titulo} ===")
-    print(f"Ordem da matriz: {len(matriz)}   Passos: {passos}")
+    print(f"Ordem da matriz: {matriz.shape[0]}   Passos: {passos}")
     imprimir_distribuicao("Distribuição inicial v(0):", nomes, vetor)
     imprimir_distribuicao(f"Depois de {passos} transições:", nomes, historia[-1])
 
@@ -431,7 +319,7 @@ def executar_caso(nomes, matriz, vetor, passos, titulo, caminho_svg="grafico_evo
         # Cadeia com dois ou mais estados absorventes: o sistema linear não tem
         # solução única, porque existem infinitos vetores fixos. O limite real
         # depende do vetor inicial, então só a convergência responde à pergunta.
-        n_classes = len(matriz) - posto(matriz_do_sistema_estacionario(matriz))
+        n_classes = matriz.shape[0] - posto(matriz_do_sistema_estacionario(matriz))
         print(
             f"\n  A matriz (P^T - I) tem {n_classes} vetores próprios associados ao autovalor 1:"
             "\n  a cadeia tem mais de uma classe fechada e o vetor limite depende de v(0)."
@@ -443,13 +331,13 @@ def executar_caso(nomes, matriz, vetor, passos, titulo, caminho_svg="grafico_evo
         f"Estacionário por convergência ({passos_ate_convergir} passos):", nomes, por_convergencia
     )
     if por_sistema is not None:
-        diferenca = max(abs(a - b) for a, b in zip(por_sistema, por_convergencia))
+        diferenca = float(np.max(np.abs(por_sistema - por_convergencia)))
         print(f"\n  Diferença máxima entre os dois métodos: {diferenca:.2e}")
     else:
         por_sistema = por_convergencia
 
-    escrever_grafico_svg(historia, nomes, caminho_svg, titulo)
-    print(f"  Gráfico salvo em: {caminho_svg}")
+    escrever_grafico(historia, nomes, caminho_png, titulo)
+    print(f"  Gráfico salvo em: {caminho_png}")
     return historia, por_sistema
 
 
@@ -472,8 +360,6 @@ def caso_interativo():
     matriz = ler_matriz(n)
     vetor = ler_vetor(n)
     passos = ler_inteiro("Número de transições a exibir no gráfico: ", 1)
-    validar_matriz(matriz)
-    validar_vetor(vetor, n)
     return executar_caso(nomes, matriz, vetor, passos, "Cadeia informada pelo usuário")
 
 
@@ -489,12 +375,13 @@ def teste_clima():
     Logo π2 = 1/2,5 = 0,4 e π1 = 0,6.
     """
     nomes = ["Sol", "Chuva"]
-    matriz = [[0.8, 0.2], [0.3, 0.7]]
-    vetor = [1.0, 0.0]
-    historia, estacionario = executar_caso(nomes, matriz, vetor, 10, "Teste 1 - previsão do tempo")
-    esperado = [0.6, 0.4]
-    erro = max(abs(a - b) for a, b in zip(estacionario, esperado))
-    print(f"\n  Saída esperada: Sol=60,000%  Chuva=40,000%")
+    matriz = np.array([[0.8, 0.2], [0.3, 0.7]])
+    vetor = np.array([1.0, 0.0])
+    _, estacionario = executar_caso(nomes, matriz, vetor, 10, "Teste 1 - previsão do tempo",
+                                    "grafico_teste1.png")
+    esperado = np.array([0.6, 0.4])
+    erro = float(np.max(np.abs(estacionario - esperado)))
+    print("\n  Saída esperada: Sol=60,000%  Chuva=40,000%")
     print(f"  Erro máximo: {erro:.2e}")
     assert erro < 1e-9, "Teste 1 falhou: estacionário diferente de (0,6; 0,4)."
     print("  Teste 1: OK")
@@ -508,20 +395,21 @@ def teste_marcas():
     substituição direta: se π é estacionário, então πP devolve o próprio π.
     """
     nomes = ["Marca A", "Marca B", "Marca C"]
-    matriz = [
+    matriz = np.array([
         [0.90, 0.08, 0.02],
         [0.10, 0.85, 0.05],
         [0.05, 0.05, 0.90],
-    ]
-    vetor = [1.0, 0.0, 0.0]
-    historia, estacionario = executar_caso(nomes, matriz, vetor, 30, "Teste 2 - migração de marcas")
+    ])
+    vetor = np.array([1.0, 0.0, 0.0])
+    _, estacionario = executar_caso(nomes, matriz, vetor, 30, "Teste 2 - migração de marcas",
+                                    "grafico_teste2.png")
     conferencia = multiplicar_vetor_matriz(estacionario, matriz)
-    residuo = max(abs(a - b) for a, b in zip(conferencia, estacionario))
+    residuo = float(np.max(np.abs(conferencia - estacionario)))
     print("\n  Conferência πP = π:")
     print("   ", formatar_linha(nomes, conferencia))
     print(f"  Resíduo máximo: {residuo:.2e}")
     assert residuo < 1e-12, "Teste 2 falhou: πP diferente de π."
-    assert abs(sum(estacionario) - 1.0) < 1e-12, "Teste 2 falhou: soma diferente de 1."
+    assert abs(estacionario.sum() - 1.0) < 1e-12, "Teste 2 falhou: soma diferente de 1."
     print("  Teste 2: OK")
     return residuo
 
