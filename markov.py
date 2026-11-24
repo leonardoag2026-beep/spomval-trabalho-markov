@@ -141,8 +141,10 @@ def posto(matriz):
     n = a.shape[0]
     linhas_com_pivo = 0
     for coluna in range(n):
+        # procura o maior valor absoluto da coluna a partir da linha atual (pivô)
         resto = np.abs(a[linhas_com_pivo:, coluna])
         if resto.size == 0 or resto.max() < 1e-12:
+            # coluna praticamente nula: não há pivô, então o posto não cresce
             continue
         pivo = linhas_com_pivo + int(np.argmax(resto))
         if pivo != linhas_com_pivo:
@@ -163,14 +165,17 @@ def resolver_sistema(matriz, termos):
     n = matriz.shape[0]
     a = np.hstack([np.array(matriz, dtype=float), np.array(termos, dtype=float).reshape(n, 1)])
     for coluna in range(n):
+        # pivoteamento parcial: sobe para a linha atual o maior pivô disponível
         pivo = coluna + int(np.argmax(np.abs(a[coluna:, coluna])))
         if abs(a[pivo, coluna]) < 1e-12:
-            return None
+            return None  # sistema singular: não existe solução única
         if pivo != coluna:
             a[[coluna, pivo]] = a[[pivo, coluna]]
+        # eliminação: zera a coluna abaixo do pivô em todas as linhas seguintes
         for i in range(coluna + 1, n):
             fator = a[i, coluna] / a[coluna, coluna]
             a[i, coluna:] -= fator * a[coluna, coluna:]
+    # substituição regressiva: da última incógnita para a primeira
     solucao = np.zeros(n)
     for i in range(n - 1, -1, -1):
         solucao[i] = (a[i, n] - a[i, i + 1:n] @ solucao[i + 1:n]) / a[i, i]
@@ -195,7 +200,8 @@ def distribuicao_estacionaria_por_sistema(matriz):
     sistema = matriz_do_sistema_estacionario(matriz)
     if n - posto(sistema) > 1:
         return None
-    sistema[-1] = np.ones(n)          # normalização: soma das componentes = 1
+    # a última equação do sistema homogêneo é trocada por soma(π) = 1
+    sistema[-1] = np.ones(n)
     termos = np.zeros(n)
     termos[-1] = 1.0
     return resolver_sistema(sistema, termos)
@@ -220,6 +226,7 @@ def evoluir(vetor, matriz, passos):
     """Devolve a história da distribuição: [v(0), v(1), ..., v(k)] como matriz (k+1) x n."""
     historia = np.zeros((passos + 1, vetor.size))
     historia[0] = vetor
+    # cada linha é a distribuição da etapa anterior multiplicada por P
     for passo in range(1, passos + 1):
         historia[passo] = historia[passo - 1] @ matriz
     return historia
