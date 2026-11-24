@@ -130,11 +130,6 @@ def multiplicar_vetor_matriz(vetor, matriz):
     return vetor @ matriz
 
 
-def potencia_matriz(matriz, expoente):
-    """Eleva a matriz de transição ao expoente (NumPy)."""
-    return np.linalg.matrix_power(matriz, expoente)
-
-
 def posto(matriz):
     """Calcula o posto da matriz pelo escalonamento (número de linhas independentes).
 
