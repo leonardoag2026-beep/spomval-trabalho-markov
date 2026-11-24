@@ -73,3 +73,5 @@ Os dois casos terminam com `Teste 1: OK` e `Teste 2: OK`.
 ## Grupo
 
 - Leonardo Alves Guimarães — SP3199584
+- Lincoln — SP319986x
+- Gabriel Marques Ribeiro — SP3216365
